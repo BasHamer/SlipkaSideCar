@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using MongoDB.Driver;
 using Slipka.DomainObjects;
 using Slipka.Repositories;
@@ -57,8 +58,9 @@ namespace Slipka.Proxy
               .ConfigureServices(s => { s.AddSingleton(FileRepository); })
               .ConfigureServices(s => { s.AddSingleton(MessageRepository); })
               .ConfigureServices(s=> { s.AddSingleton(SaveSession); })
+              .ConfigureServices(s => { s.AddLogging(); })
               .UseKestrel()
-              .UseUrls($"{(Session.ProxyPortHttps ? "https" : "http")}://*:{Session.ProxyPort}") 
+              .UseUrls($"{(Session.ProxyPortHttps ? "https" : "http")}://*:{Session.ProxyPort}")
               .UseStartup<ProxyStartup>()
               .Build();
             Host.Start();

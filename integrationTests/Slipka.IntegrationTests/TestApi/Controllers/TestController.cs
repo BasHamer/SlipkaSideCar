@@ -147,6 +147,78 @@ public class TestController : ControllerBase
             timestamp = DateTime.UtcNow
         });
     }
+
+    [HttpGet("correlation")]
+    public IActionResult Correlation()
+    {
+        _logger.LogInformation("Correlation endpoint called");
+
+        var correlationId = Request.Headers.ContainsKey("x-correlation-id")
+            ? Request.Headers["x-correlation-id"].ToString()
+            : "not-provided";
+
+        var correlationSubId = Request.Headers.ContainsKey("x-correlation-sub-id")
+            ? Request.Headers["x-correlation-sub-id"].ToString()
+            : "not-provided";
+
+        return Ok(new
+        {
+            correlationId,
+            correlationSubId,
+            timestamp = DateTime.UtcNow,
+            allHeaders = Request.Headers.ToDictionary(h => h.Key, h => h.Value.ToString())
+        });
+    }
+
+    [HttpPost("log-test")]
+    public IActionResult LogTest([FromBody] LogTestRequest request)
+    {
+        _logger.LogInformation("Log test endpoint called with correlation ID: {CorrelationId}",
+            Request.Headers.ContainsKey("x-correlation-id") ? Request.Headers["x-correlation-id"].ToString() : "none");
+
+        return Ok(new
+        {
+            received = request,
+            correlationId = Request.Headers.ContainsKey("x-correlation-id") ? Request.Headers["x-correlation-id"].ToString() : null,
+            correlationSubId = Request.Headers.ContainsKey("x-correlation-sub-id") ? Request.Headers["x-correlation-sub-id"].ToString() : null,
+            timestamp = DateTime.UtcNow
+        });
+    }
+
+    [HttpGet("secure")]
+    public IActionResult Secure()
+    {
+        _logger.LogInformation("Secure endpoint called - should only be accessible via HTTPS");
+
+        // Check if request was made over HTTPS (this would be set by reverse proxy or load balancer)
+        var forwardedProto = Request.Headers.ContainsKey("X-Forwarded-Proto")
+            ? Request.Headers["X-Forwarded-Proto"].ToString()
+            : "http";
+
+        return Ok(new
+        {
+            secure = forwardedProto == "https",
+            protocol = forwardedProto,
+            timestamp = DateTime.UtcNow
+        });
+    }
+
+    [HttpGet("mixed-protocol")]
+    public IActionResult MixedProtocol()
+    {
+        _logger.LogInformation("Mixed protocol endpoint called");
+
+        var forwardedProto = Request.Headers.ContainsKey("X-Forwarded-Proto")
+            ? Request.Headers["X-Forwarded-Proto"].ToString()
+            : "http";
+
+        return Ok(new
+        {
+            protocol = forwardedProto,
+            supportsBoth = true,
+            timestamp = DateTime.UtcNow
+        });
+    }
 }
 
 public class EchoRequest
@@ -162,4 +234,11 @@ public class DataRequest
     public int Value { get; set; }
     public bool Validate { get; set; } = true;
     public List<string> Tags { get; set; } = new();
+}
+
+public class LogTestRequest
+{
+    public string Message { get; set; } = string.Empty;
+    public string Level { get; set; } = "Information";
+    public Dictionary<string, string> Properties { get; set; } = new();
 }

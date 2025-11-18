@@ -35,8 +35,11 @@ namespace Slipka
                 var autoStartProxies = staticProxyStatuses.Where(s => s.IsAutoStart).ToList();
                 var runningAutoStartProxies = autoStartProxies.Where(s => s.IsRunning).ToList();
 
-                // Get dynamic proxy information
-                var dynamicProxies = _proxyStore.All.ToList();
+                // Get static proxy IDs to exclude from dynamic proxies
+                var staticProxyIds = _staticProxyManager.GetStaticProxyIds().ToHashSet();
+
+                // Get dynamic proxy information (exclude static proxies)
+                var dynamicProxies = _proxyStore.All.Where(s => !staticProxyIds.Contains(s.Id)).ToList();
 
                 // Create detailed static proxy information
                 var staticProxyDetails = staticProxyStatuses.Select(s => new

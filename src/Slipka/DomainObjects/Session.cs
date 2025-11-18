@@ -4,6 +4,7 @@ using Newtonsoft.Json;
 using Slipka.Preprocessors.Interfaces;
 using Slipka.ValueObjects;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
@@ -16,13 +17,13 @@ namespace Slipka.DomainObjects
         public Session()
         {
             Id = Guid.NewGuid().ToString();
-            Calls = new List<Call>();
-            Tags = new List<string>();
-            RecordedCalls = new List<CallTemplate>();
-            InjectedCalls = new List<CallTemplate>();
-            TaggedCalls = new List<CallTemplate>();
-            Decorations = new List<Header>();
-            Preprocessors = new List<IPreprocessor>();
+            Calls = new ConcurrentQueue<Call>();
+            Tags = new ConcurrentBag<string>();
+            RecordedCalls = new ConcurrentBag<CallTemplate>();
+            InjectedCalls = new ConcurrentBag<CallTemplate>();
+            TaggedCalls = new ConcurrentBag<CallTemplate>();
+            Decorations = new ConcurrentBag<Header>();
+            Preprocessors = new ConcurrentBag<IPreprocessor>();
         }
         [JsonIgnore]
         [BsonId]
@@ -32,7 +33,7 @@ namespace Slipka.DomainObjects
         [BsonElement("name")]
         public string Name { get; set; }
         [BsonElement("calls")]
-        public List<Call> Calls { get; set; }
+        public ConcurrentQueue<Call> Calls { get; set; }
         [BsonElement("proxy_port")]
         public int ProxyPort { get; set; }
         [Required]
@@ -46,21 +47,24 @@ namespace Slipka.DomainObjects
         public bool TargetPortHttps { get; set; }
 
         [BsonElement]
-        public List<string> Tags { get; set; }
+        public ConcurrentBag<string> Tags { get; set; }
 
         [BsonElement("recorded_calls")]
-        public List<CallTemplate> RecordedCalls { get; set; }
+        public ConcurrentBag<CallTemplate> RecordedCalls { get; set; }
         [BsonElement("overridden_calls")]
-        public List<CallTemplate> InjectedCalls { get; set; }
+        public ConcurrentBag<CallTemplate> InjectedCalls { get; set; }
         [BsonElement("tagged_calls")]
-        public List<CallTemplate> TaggedCalls { get; set; }
+        public ConcurrentBag<CallTemplate> TaggedCalls { get; set; }
         [BsonElement("decorations")]
-        public List<Header> Decorations { get; set; }
+        public ConcurrentBag<Header> Decorations { get; set; }
         [BsonIgnore] // Preprocessors are not serialized to MongoDB as they contain runtime state
-        public List<IPreprocessor> Preprocessors { get; set; }
+        public ConcurrentBag<IPreprocessor> Preprocessors { get; set; }
 
         [BsonElement("retain_data_until")]
         public DateTime RetainDataUntil { get; set; }
+
+        [BsonElement("max_calls_in_memory")]
+        public int? MaxCallsInMemory { get; set; }
 
         [BsonIgnore]
         public DateTime LeaveProxyOpenUntil { get; set; }
@@ -71,12 +75,9 @@ namespace Slipka.DomainObjects
         public int State()
         {
             int state = 0;
-            lock(Calls)
-            {
-                state += Calls.Count(x => x.RequestId != ObjectId.Empty);
-                state += Calls.Count(x => x.ResponseId != ObjectId.Empty);
-                state += Tags.Count();
-            }
+            state += Calls.Count(x => x.RequestId != ObjectId.Empty);
+            state += Calls.Count(x => x.ResponseId != ObjectId.Empty);
+            state += Tags.Count;
             return state;
         }
     }

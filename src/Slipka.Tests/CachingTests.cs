@@ -92,14 +92,6 @@ namespace Slipka.Tests
             Assert.Equal(HealthStatus.Healthy, result.Status);
             Assert.Contains("Redis caching is disabled", result.Description);
         }
-
-        [Fact]
-        public async Task RedisHealthCheck_WhenCacheWorks_ReturnsHealthy()
-        {
-            // Arrange - Skip this test as it's unrelated to preprocessor functionality
-            // and has complex Moq setup issues with extension methods
-            Assert.True(true, "Skipping Redis health check test - unrelated to preprocessor functionality");
-        }
     }
 
     // Extension method to make testing logging easier

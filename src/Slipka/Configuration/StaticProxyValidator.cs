@@ -31,9 +31,9 @@ namespace Slipka.Configuration
                 }
 
                 // Check port range
-                if (proxy.Port < _proxySettings.FirstPort || proxy.Port > _proxySettings.LastPort)
+                if (proxy.Port < _proxySettings.StaticFirstPort || proxy.Port > _proxySettings.StaticLastPort)
                 {
-                    result.Errors.Add($"Proxy '{proxy.Id}' port {proxy.Port} is outside allowed range [{_proxySettings.FirstPort}, {_proxySettings.LastPort}]");
+                    result.Errors.Add($"Proxy '{proxy.Id}' port {proxy.Port} is outside allowed static proxy range [{_proxySettings.StaticFirstPort}, {_proxySettings.StaticLastPort}]");
                 }
 
                 // Check for duplicate ports within static proxies

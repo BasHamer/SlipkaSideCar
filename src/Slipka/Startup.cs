@@ -15,6 +15,8 @@ using Slipka.Configuration;
 using Slipka.Repositories;
 using Slipka.Proxy;
 using System.IO;
+using Serilog;
+using Serilog.Events;
 
 namespace Slipka
 {
@@ -30,6 +32,17 @@ namespace Slipka
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
+            // Configure Serilog
+            Log.Logger = new LoggerConfiguration()
+                .MinimumLevel.Debug()
+                .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
+                .Enrich.FromLogContext()
+                .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj} {Properties:j}{NewLine}{Exception}")
+                .WriteTo.File("logs/slipka-.log",
+                    rollingInterval: RollingInterval.Day,
+                    outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} {Level:u3}] {CorrelationId} {Message:lj} {Properties:j}{NewLine}{Exception}")
+                .CreateLogger();
+
             var status = new Status();
             var configurationFactory = new ConfigurationFactory(Configuration, status);
             var settings = configurationFactory.Create<MongoSettings>();
@@ -39,6 +52,9 @@ namespace Slipka
 
             // Register GraphQL types via DI and rely on IServiceProvider-based schema
             services.AddMvc();
+
+            // Add Serilog
+            services.AddLogging(loggingBuilder => loggingBuilder.AddSerilog());
 
             // Configure Redis distributed cache if enabled
             if (redisSettings.Enabled)
@@ -89,6 +105,17 @@ namespace Slipka
             services.AddSingleton(validator);
             services.AddSingleton<StaticProxyManager>();
             services.AddHostedService<StaticProxyInitializationService>();
+
+            // Reverse proxy configuration
+            var reverseProxySettings = Configuration.GetSection("ReverseProxy").Get<Configuration.ReverseProxySettings>() ?? new Configuration.ReverseProxySettings();
+            services.AddSingleton(reverseProxySettings);
+
+            // Authentication settings
+            var authSettings = Configuration.GetSection("Authentication").Get<AuthenticationSettings>() ?? new AuthenticationSettings();
+            services.AddSingleton(authSettings);
+
+            services.AddSingleton<ReverseProxyManager>();
+            services.AddHostedService<ReverseProxyInitializationService>();
 
             // Preprocessor configuration and services
             var preprocessorSettings = Configuration.GetSection("PreprocessorSettings").Get<PreprocessorSettings>() ?? new PreprocessorSettings();

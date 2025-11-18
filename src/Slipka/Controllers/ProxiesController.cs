@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -29,6 +30,7 @@ namespace Slipka.Controllers
             IFileRepository fileRepository,
             IMessageRepository messageRepository,
             StaticProxyManager staticProxyManager,
+            ReverseProxyManager reverseProxyManager,
             ICacheInvalidationService cacheInvalidationService,
             IPreprocessorFactory preprocessorFactory)
         {
@@ -37,10 +39,11 @@ namespace Slipka.Controllers
             FileRepository = fileRepository;
             MessageRepository = messageRepository;
             StaticProxyManager = staticProxyManager;
+            ReverseProxyManager = reverseProxyManager;
             CacheInvalidationService = cacheInvalidationService;
             PreprocessorFactory = preprocessorFactory;
             Random = new Random(Guid.NewGuid().GetHashCode());
-            ReservedPorts = Enumerable.Range(Settings.FirstPort, Settings.LastPort - Settings.FirstPort).ToArray();
+            ReservedPorts = Enumerable.Range(Settings.FirstPort, Settings.LastPort - Settings.FirstPort + 1).ToArray();
         }
 
         private ProxySettings Settings { get; }
@@ -48,6 +51,7 @@ namespace Slipka.Controllers
         private IFileRepository FileRepository { get; }
         private IMessageRepository MessageRepository { get; }
         private StaticProxyManager StaticProxyManager { get; }
+        private ReverseProxyManager ReverseProxyManager { get; }
         private ICacheInvalidationService CacheInvalidationService { get; }
         private IPreprocessorFactory PreprocessorFactory { get; }
         private int[] ReservedPorts { get; }
@@ -71,17 +75,22 @@ namespace Slipka.Controllers
                 ProxyPortHttps = value.ProxyPortHttps,
                 TargetPortHttps = value.TargetPortHttps,
                 LeaveProxyOpenUntil = DateTime.UtcNow.Add(open > Settings.MaxOpenFor ? Settings.MaxOpenFor : open),
-                RetainDataUntil = DateTime.UtcNow.Add(retained > Settings.MaxRetainedFor ? Settings.MaxRetainedFor : retained)
+                RetainDataUntil = DateTime.UtcNow.Add(retained > Settings.MaxRetainedFor ? Settings.MaxRetainedFor : retained),
+                MaxCallsInMemory = value.MaxCallsInMemory
             };
 
             if (value.TaggedCalls != null)
-                session.TaggedCalls.AddRange(value.TaggedCalls.Select(x => x.AsCallTemplate));
+                foreach (var item in value.TaggedCalls.Select(x => x.AsCallTemplate))
+                    session.TaggedCalls.Add(item);
             if (value.RecordedCalls != null)
-                session.RecordedCalls.AddRange(value.RecordedCalls.Select(x => x.AsCallTemplate));
+                foreach (var item in value.RecordedCalls.Select(x => x.AsCallTemplate))
+                    session.RecordedCalls.Add(item);
             if (value.InjectedCalls != null)
-                session.InjectedCalls.AddRange(value.InjectedCalls.Select(x => x.AsCallTemplate));
+                foreach (var item in value.InjectedCalls.Select(x => x.AsCallTemplate))
+                    session.InjectedCalls.Add(item);
             if (value.Decorations != null)
-                session.Decorations.AddRange(value.Decorations.Select(x => x.AsHeader));
+                foreach (var item in value.Decorations.Select(x => x.AsHeader))
+                    session.Decorations.Add(item);
 
             if (value.Preprocessors != null)
             {
@@ -101,7 +110,7 @@ namespace Slipka.Controllers
             }
 
             session.InternalId = new MongoDB.Bson.ObjectId();
-            session.Calls = new List<Call>();
+            session.Calls = new ConcurrentQueue<Call>();
 
             Slipka.Proxy.Proxy proxy;
             lock (ReservedPorts)
@@ -186,10 +195,7 @@ namespace Slipka.Controllers
         {
             if (!SessionAvailableForModification(id, out var error, out Session session))
                 return error;
-            lock (session.RecordedCalls)
-            {
-                session.RecordedCalls.Add(call);
-            }
+            session.RecordedCalls.Add(call);
             return Ok(session);
         }
 
@@ -200,10 +206,7 @@ namespace Slipka.Controllers
                 return error;
             if (string.IsNullOrWhiteSpace(call.StatusCode))
                 call.StatusCode = HttpStatusCode.OK.ToString();
-            lock (session.InjectedCalls)
-            {
-                session.InjectedCalls.Add(call);
-            }
+            session.InjectedCalls.Add(call);
             return Ok(session);
         }
 
@@ -212,10 +215,7 @@ namespace Slipka.Controllers
         {
             if (!SessionAvailableForModification(id, out var error, out Session session))
                 return error;
-            lock (session.TaggedCalls)
-            {
-                session.TaggedCalls.Add(call);
-            }
+            session.TaggedCalls.Add(call);
             return Ok(session);
         }
 
@@ -224,10 +224,7 @@ namespace Slipka.Controllers
         {
             if (!SessionAvailableForModification(id, out var error, out Session session))
                 return error;
-            lock (session.Decorations)
-            {
-                session.Decorations.Add(header);
-            }
+            session.Decorations.Add(header);
             return Ok(session);
         }
 
@@ -245,10 +242,7 @@ namespace Slipka.Controllers
             try
             {
                 var preprocessor = await preprocessorMessage.ToPreprocessorAsync(PreprocessorFactory);
-                lock (session.Preprocessors)
-                {
-                    session.Preprocessors.Add(preprocessor);
-                }
+                session.Preprocessors.Add(preprocessor);
                 return Ok(session);
             }
             catch (Exception ex)
@@ -365,5 +359,56 @@ namespace Slipka.Controllers
                 return StatusCode(500, $"Failed to restart static proxy: {ex.Message}");
             }
         }
+
+        // GET: api/Proxies/reverse
+        [HttpGet("reverse")]
+        [ResponseCache(Duration = 30)] // Cache for 30 seconds
+        public ActionResult<ReverseProxyStatus> GetReverseProxy()
+        {
+            var status = new ReverseProxyStatus
+            {
+                Port = ReverseProxyManager.Port,
+                IsRunning = ReverseProxyManager.IsRunning,
+                Routes = ReverseProxyManager.Routes.ToList()
+            };
+            return Ok(status);
+        }
+
+        // POST: api/Proxies/reverse/start
+        [HttpPost("reverse/start")]
+        public async Task<ActionResult> StartReverseProxy()
+        {
+            try
+            {
+                await ReverseProxyManager.StartReverseProxyAsync();
+                return Ok();
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Failed to start reverse proxy: {ex.Message}");
+            }
+        }
+
+        // POST: api/Proxies/reverse/stop
+        [HttpPost("reverse/stop")]
+        public async Task<ActionResult> StopReverseProxy()
+        {
+            try
+            {
+                await ReverseProxyManager.StopReverseProxyAsync();
+                return Ok();
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Failed to stop reverse proxy: {ex.Message}");
+            }
+        }
+    }
+
+    public class ReverseProxyStatus
+    {
+        public int Port { get; set; }
+        public bool IsRunning { get; set; }
+        public List<ReverseProxyRoute> Routes { get; set; }
     }
 }

@@ -492,6 +492,71 @@ Static proxies are automatically monitored to ensure:
 }
 ```
 
+### Authentication Settings
+
+Slipka supports JWT token validation for reverse proxy routes. Authentication is configured in the `Authentication` section:
+
+```json
+{
+  "Authentication": {
+    "ValidateIssuer": true,
+    "Issuer": "your-issuer",
+    "ValidateAudience": true,
+    "Audience": "your-audience",
+    "ValidateLifetime": true,
+    "ValidateIssuerSigningKey": true,
+    "IssuerSigningKey": "",
+    "IssuerSigningKeyEnvironmentVariable": "SLIPKA_JWT_SIGNING_KEY",
+    "ClockSkewMinutes": 5
+  }
+}
+```
+
+#### JWT Signing Key Configuration
+
+The JWT signing key can be provided through an environment variable for better security:
+
+1. **Environment Variable (Recommended)**: Set `SLIPKA_JWT_SIGNING_KEY` environment variable with your secret key
+2. **Configuration Fallback**: If the environment variable is not set, the key can be specified in `IssuerSigningKey`
+
+The key can be:
+- A plain text string (minimum 256 bits recommended)
+- A base64-encoded binary key
+
+Example environment variable setup:
+```bash
+export SLIPKA_JWT_SIGNING_KEY="your-256-bit-secret-key-here"
+```
+
+#### Reverse Proxy Authentication
+
+Routes in the reverse proxy can require authentication by setting `RequiresAuthentication: true`:
+
+```json
+{
+  "ReverseProxy": {
+    "Routes": [
+      {
+        "Id": "public-api",
+        "Path": "/api/public/*",
+        "TargetHost": "localhost",
+        "TargetPort": 3000,
+        "RequiresAuthentication": false
+      },
+      {
+        "Id": "secure-api",
+        "Path": "/api/secure/*",
+        "TargetHost": "localhost",
+        "TargetPort": 3001,
+        "RequiresAuthentication": true
+      }
+    ]
+  }
+}
+```
+
+Routes requiring authentication will validate JWT tokens in the `Authorization` header (Bearer format).
+
 ### Port Range
 - Dynamic proxies are assigned ports from 61710 to 61920 (210 ports available)
 - Static proxies can use any port within this range with fixed assignments

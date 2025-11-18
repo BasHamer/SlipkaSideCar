@@ -14,6 +14,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Slipka.DomainObjects;
 using Slipka.Repositories;
+using Serilog;
 
 namespace Slipka.Proxy
 {
@@ -24,7 +25,8 @@ namespace Slipka.Proxy
             Session session,
             IFileRepository fileRepository,
             IMessageRepository messageRepository,
-            EventHandler<SessionEventArgs> sessionUpdate
+            EventHandler<SessionEventArgs> sessionUpdate,
+            ILogger<ProxyStartup> logger
             )
         {
             Configuration = configuration;
@@ -33,6 +35,7 @@ namespace Slipka.Proxy
             FileRepository = fileRepository;
             MessageRepository = messageRepository;
             SessionUpdate = sessionUpdate;
+            Logger = logger;
         }
 
         private EventHandler<SessionEventArgs> SessionUpdate { get;}
@@ -41,11 +44,14 @@ namespace Slipka.Proxy
         public IConfiguration Configuration { get; }
         public Session Session { get; }
         public HostString Target { get; }
+        private ILogger<ProxyStartup> Logger { get; }
 
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
-            var handler = new ProxyHandler(Session, FileRepository, MessageRepository);
+            var loggerFactory = services.BuildServiceProvider().GetService<ILoggerFactory>();
+            var proxyHandlerLogger = loggerFactory.CreateLogger<ProxyHandler>();
+            var handler = new ProxyHandler(Session, FileRepository, MessageRepository, proxyHandlerLogger);
             handler.ImportantDataAddedEvent += SessionUpdate;
             services.AddMvc();
             services.AddProxy(options =>

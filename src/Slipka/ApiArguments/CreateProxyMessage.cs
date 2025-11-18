@@ -43,5 +43,7 @@ namespace Slipka.ApiArguments
 
         [IsFuture()]
         public string OpenFor { get; set; }
+
+        public int? MaxCallsInMemory { get; set; } // Maximum number of recent calls to keep in memory (null = unlimited)
     }
 }

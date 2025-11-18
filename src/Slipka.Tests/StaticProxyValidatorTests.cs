@@ -13,7 +13,9 @@ namespace Slipka.Tests
             _proxySettings = new ProxySettings
             {
                 FirstPort = 61000,
-                LastPort = 62000
+                LastPort = 61500,
+                StaticFirstPort = 61501,
+                StaticLastPort = 62000
             };
         }
 
@@ -29,7 +31,7 @@ namespace Slipka.Tests
                     new StaticProxyConfig
                     {
                         Id = "test-proxy-1",
-                        Port = 61500,
+                        Port = 61501,
                         TargetHost = "api.example.com",
                         TargetPort = 80,
                         AutoStart = true
@@ -37,7 +39,7 @@ namespace Slipka.Tests
                     new StaticProxyConfig
                     {
                         Id = "test-proxy-2",
-                        Port = 61501,
+                        Port = 61502,
                         TargetHost = "api2.example.com",
                         TargetPort = 443,
                         AutoStart = false
@@ -76,7 +78,7 @@ namespace Slipka.Tests
 
             // Assert
             Assert.False(result.IsValid);
-            Assert.Contains(result.Errors, e => e.Contains("outside allowed range"));
+            Assert.Contains(result.Errors, e => e.Contains("outside allowed static proxy range"));
         }
 
         [Fact]
@@ -91,13 +93,13 @@ namespace Slipka.Tests
                     new StaticProxyConfig
                     {
                         Id = "proxy-1",
-                        Port = 61500,
+                        Port = 61501,
                         TargetHost = "api1.example.com"
                     },
                     new StaticProxyConfig
                     {
                         Id = "proxy-2",
-                        Port = 61500, // Duplicate port
+                        Port = 61501, // Duplicate port
                         TargetHost = "api2.example.com"
                     }
                 }
@@ -123,13 +125,13 @@ namespace Slipka.Tests
                     new StaticProxyConfig
                     {
                         Id = "duplicate-id",
-                        Port = 61500,
+                        Port = 61501,
                         TargetHost = "api1.example.com"
                     },
                     new StaticProxyConfig
                     {
                         Id = "duplicate-id", // Duplicate ID
-                        Port = 61501,
+                        Port = 61502,
                         TargetHost = "api2.example.com"
                     }
                 }

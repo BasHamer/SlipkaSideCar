@@ -4,6 +4,7 @@ using MongoDB.Driver;
 using Slipka.Configuration;
 using Slipka.DomainObjects;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -75,14 +76,14 @@ namespace Slipka.Repositories
             {
                 copy = new Session
                 {
-                    Calls = item.Calls.ToList(),
+                    Calls = new ConcurrentQueue<Call>(item.Calls.ToList()),
                     InternalId = item.InternalId,
                     Id = item.Id,
                     Name = item.Name,
                     ProxyPort = item.ProxyPort,
                     TargetHost = item.TargetHost,
                     TargetPort = item.TargetPort,
-                    Tags = item.Tags.ToList(),
+                    Tags = new ConcurrentBag<string>(item.Tags.ToList()),
                     RecordedCalls = item.RecordedCalls,
                     InjectedCalls = item.InjectedCalls,
                     TaggedCalls = item.TaggedCalls,

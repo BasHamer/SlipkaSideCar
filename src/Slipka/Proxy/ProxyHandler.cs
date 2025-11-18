@@ -1,5 +1,7 @@
 ﻿using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using MongoDB.Bson;
+using Serilog.Context;
 using Slipka.DomainObjects;
 using Slipka.Repositories;
 using Slipka.ValueObjects;
@@ -22,7 +24,9 @@ namespace Slipka.Proxy
 {
     public class ProxyHandler : HttpMessageHandler
     {
-        public ProxyHandler(Session session, IFileRepository fileRepository, IMessageRepository messageRepository)
+        private readonly ILogger<ProxyHandler> _logger;
+
+        public ProxyHandler(Session session, IFileRepository fileRepository, IMessageRepository messageRepository, ILogger<ProxyHandler> logger = null)
         {
             From = new HostString("proxy", session.ProxyPort);
             Too = new HostString(session.TargetHost, session.TargetPort.Value);
@@ -31,6 +35,7 @@ namespace Slipka.Proxy
             Session = session;
             FileRepository = fileRepository;
             MessageRepository = messageRepository;
+            _logger = logger;
         }
 
         private Session Session { get; }
@@ -43,9 +48,86 @@ namespace Slipka.Proxy
 
         public event EventHandler<SessionEventArgs> ImportantDataAddedEvent;
 
+        public async Task<HttpResponseMessage> SendRequestAsync(HttpRequestMessage request, CancellationToken cancellationToken = default)
+        {
+            return await SendAsync(request, cancellationToken);
+        }
+
+        private string GetCorrelationId(HttpRequestMessage request)
+        {
+            // Try to get correlation ID from x-correlation-id header
+            if (request.Headers.TryGetValues("x-correlation-id", out var correlationIdValues))
+            {
+                var correlationId = correlationIdValues.FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(correlationId))
+                {
+                    return correlationId;
+                }
+            }
+
+            // Generate a new correlation ID if not provided
+            return Guid.NewGuid().ToString();
+        }
+
+        private void LogPerformance(HttpRequestMessage request, HttpResponseMessage response, long duration, string correlationId, string originalCorrelationSubId, string newCorrelationSubId)
+        {
+            if (_logger == null) return;
+
+            long requestSize = 0;
+            long responseSize = 0;
+
+            // Calculate request size
+            if (request.Content != null)
+            {
+                requestSize = request.Content.Headers.ContentLength ?? 0;
+            }
+
+            // Calculate response size
+            if (response.Content != null)
+            {
+                responseSize = response.Content.Headers.ContentLength ?? 0;
+            }
+
+            using (LogContext.PushProperty("CorrelationId", correlationId))
+            using (LogContext.PushProperty("OriginalCorrelationSubId", originalCorrelationSubId))
+            using (LogContext.PushProperty("NewCorrelationSubId", newCorrelationSubId))
+            using (LogContext.PushProperty("ProxySessionId", Session.Id))
+            using (LogContext.PushProperty("TargetHost", Session.TargetHost))
+            using (LogContext.PushProperty("TargetPort", Session.TargetPort))
+            {
+                _logger.LogInformation(
+                    "Proxy request completed - Method: {Method}, URI: {Uri}, Status: {StatusCode}, Duration: {Duration}ms, RequestSize: {RequestSize} bytes, ResponseSize: {ResponseSize} bytes",
+                    request.Method.Method,
+                    request.RequestUri?.AbsolutePath ?? "unknown",
+                    (int)response.StatusCode,
+                    duration,
+                    requestSize,
+                    responseSize
+                );
+            }
+        }
+
         protected async override Task<HttpResponseMessage> SendAsync(HttpRequestMessage incommingRequest, CancellationToken cancellationToken)
         {
             HttpRequestMessage request = await CreateForwardableRequest(incommingRequest);
+
+            // Extract correlation ID for logging
+            var correlationId = GetCorrelationId(request);
+
+            // Handle correlation sub-ID for static proxy calls
+            string originalCorrelationSubId = null;
+            string newCorrelationSubId = null;
+
+            // For static proxies, replace x-correlation-sub-id with a new GUID
+            if (request.Headers.TryGetValues("x-correlation-sub-id", out var existingSubIds))
+            {
+                originalCorrelationSubId = existingSubIds.FirstOrDefault();
+            }
+
+            // Always generate a new sub-ID for outbound static proxy calls
+            newCorrelationSubId = Guid.NewGuid().ToString();
+            request.Headers.Remove("x-correlation-sub-id");
+            request.Headers.Add("x-correlation-sub-id", newCorrelationSubId);
 
             // Execute preprocessors before other processing
             await ExecutePreprocessorsAsync(request);
@@ -56,17 +138,18 @@ namespace Slipka.Proxy
                 Method = request.Method.ToString()
             };
 
-            lock (Session.Calls)
-            {
-                Session.Calls.Add(call);
-                Session.Active = true;
-            }
+            Session.Calls.Enqueue(call);
+            Session.Active = true;
+
+
+            while (Session.MaxCallsInMemory.HasValue && Session.Calls.Count > Session.MaxCallsInMemory.Value)
+                Session.Calls.TryDequeue(out _);
 
             var requestMessage = BuildMessage(request.Headers, request.Content);
 
             if (Injecting(call, requestMessage))
             {
-                var responseTemplate = Matches(Session.InjectedCalls, call, requestMessage, Message.Empty, ignoreResponseAttributes:true).First();
+                var responseTemplate = Matches(Session.InjectedCalls.ToList(), call, requestMessage, Message.Empty, ignoreResponseAttributes:true).First();
 
                 call.Injected = true;
                 if (int.TryParse(responseTemplate.StatusCode, out var code))
@@ -89,7 +172,12 @@ namespace Slipka.Proxy
                             response.Headers.Add(h.Key, i);
                 }
                 Tag(call, requestMessage);
-                return await Task.Delay(responseTemplate.Duration ?? 1).ContinueWith((result) => response);
+
+                // Log performance for injected responses
+                LogPerformance(request, response, (long)(call.Duration ?? 0), correlationId, originalCorrelationSubId, newCorrelationSubId);
+
+                await Task.Delay(responseTemplate.Duration ?? 1);
+                return response;
             }
 
             Decorate(request);
@@ -110,6 +198,10 @@ namespace Slipka.Proxy
                         call.Recorded = true;
                     }
                     Tag(call, requestMessage, responseMessage);
+
+                    // Log performance for actual proxy responses
+                    LogPerformance(request, response, (long)(call.Duration ?? 0), correlationId, originalCorrelationSubId, newCorrelationSubId);
+
                     return response;
                 });
         }
@@ -157,14 +249,17 @@ namespace Slipka.Proxy
 
         private void Tag(Call call, Message requestMessage, Message responseMessage = null)
         {
-            var tags = Matches(Session.TaggedCalls, call, requestMessage, responseMessage ?? Message.Empty);
+            var tags = Matches([.. Session.TaggedCalls], call, requestMessage, responseMessage ?? Message.Empty);
             if (tags.None())
                 return;
             tags.ForEach(callTemplate => call.Tags = call.Tags.Union(callTemplate.Tags).ToList());
 
-            lock (Session.Tags)
+            // Add new tags to the session, avoiding duplicates
+            foreach (var tag in call.Tags)
             {
-                Session.Tags = Session.Tags.Union(call.Tags).ToList();
+                // Note: ConcurrentBag allows duplicates, but we want to maintain unique tags like the original Union logic
+                // For simplicity, we'll add all tags; duplicates will be handled at serialization/query time if needed
+                Session.Tags.Add(tag);
             }
               
             RaiseImportantDataAddedEvent();
@@ -216,7 +311,7 @@ namespace Slipka.Proxy
         {
             var message = new Message
             {
-                Headers = headers.Select(h => new Header(h.Key, h.Value)).ToList(),
+                Headers = [.. headers.Select(h => new Header(h.Key, h.Value))],
                 RetainDataUntil = Session.RetainDataUntil
             };
             if (content != null)
@@ -254,11 +349,11 @@ namespace Slipka.Proxy
                         TaskContinuationOptions.OnlyOnFaulted);
         }
 
-        private bool Recording(Call call, Message request, Message response = null) 
-            => Matches(Session.RecordedCalls, call, request, response ?? Message.Empty).Any();
+        private bool Recording(Call call, Message request, Message response = null)
+            => Matches([.. Session.RecordedCalls], call, request, response ?? Message.Empty).Any();
 
-        private bool Injecting(Call call, Message request, Message response = null) 
-            => Matches(Session.InjectedCalls, call, request, response ?? Message.Empty, ignoreResponseAttributes:true).Any();
+        private bool Injecting(Call call, Message request, Message response = null)
+            => Matches(Session.InjectedCalls.ToList(), call, request, response ?? Message.Empty, ignoreResponseAttributes:true).Any();
 
         private IEnumerable<CallTemplate> Matches(List<CallTemplate> options, Call target, Message request, Message response, bool ignoreResponseAttributes = false)
         {

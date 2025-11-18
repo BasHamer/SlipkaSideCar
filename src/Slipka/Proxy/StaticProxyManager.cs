@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Slipka.ApiArguments;
 using Slipka.Configuration;
@@ -5,12 +7,113 @@ using Slipka.DomainObjects;
 using Slipka.Preprocessors.Interfaces;
 using Slipka.Repositories;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 
 namespace Slipka.Proxy
 {
+    public class ReverseProxyManager
+    {
+        private readonly ILogger<ReverseProxyManager> _logger;
+        private readonly ReverseProxySettings _settings;
+        private readonly AuthenticationSettings _authSettings;
+        private readonly IFileRepository _fileRepository;
+        private readonly IMessageRepository _messageRepository;
+        private readonly ISessionRepository _sessionRepository;
+        private readonly ProxyStore _proxyStore;
+        private readonly IPreprocessorFactory _preprocessorFactory;
+
+        private IWebHost _reverseProxyHost;
+        private bool _isRunning;
+
+        public ReverseProxyManager(
+            ILogger<ReverseProxyManager> logger,
+            ReverseProxySettings settings,
+            AuthenticationSettings authSettings,
+            IFileRepository fileRepository,
+            IMessageRepository messageRepository,
+            ISessionRepository sessionRepository,
+            ProxyStore proxyStore,
+            IPreprocessorFactory preprocessorFactory)
+        {
+            _logger = logger;
+            _settings = settings;
+            _authSettings = authSettings;
+            _fileRepository = fileRepository;
+            _messageRepository = messageRepository;
+            _sessionRepository = sessionRepository;
+            _proxyStore = proxyStore;
+            _preprocessorFactory = preprocessorFactory;
+        }
+
+        public async Task StartReverseProxyAsync()
+        {
+            if (_isRunning)
+            {
+                _logger.LogWarning("Reverse proxy is already running");
+                return;
+            }
+
+            try
+            {
+                _reverseProxyHost = new WebHostBuilder()
+                    .ConfigureServices(s =>
+                    {
+                        s.AddSingleton(_settings);
+                        s.AddSingleton(_authSettings);
+                        s.AddSingleton(_fileRepository);
+                        s.AddSingleton(_messageRepository);
+                        s.AddSingleton(_sessionRepository);
+                        s.AddSingleton(_proxyStore);
+                        s.AddSingleton(_preprocessorFactory);
+                    })
+                    .UseKestrel()
+                    .UseUrls($"{(_settings.EnableHttps ? "https" : "http")}://*:{_settings.Port}")
+                    .UseStartup<ReverseProxyStartup>()
+                    .Build();
+
+                await _reverseProxyHost.StartAsync();
+                _isRunning = true;
+
+                _logger.LogInformation("Started reverse proxy on port {Port}", _settings.Port);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to start reverse proxy on port {Port}", _settings.Port);
+                throw;
+            }
+        }
+
+        public async Task StopReverseProxyAsync()
+        {
+            if (!_isRunning)
+            {
+                _logger.LogWarning("Reverse proxy is not running");
+                return;
+            }
+
+            try
+            {
+                await _reverseProxyHost.StopAsync();
+                _reverseProxyHost.Dispose();
+                _isRunning = false;
+
+                _logger.LogInformation("Stopped reverse proxy");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to stop reverse proxy", ex);
+                throw;
+            }
+        }
+
+        public bool IsRunning => _isRunning;
+        public int Port => _settings.Port;
+        public IEnumerable<ReverseProxyRoute> Routes => _settings.Routes;
+    }
+
     public class StaticProxyManager
     {
         private readonly ILogger<StaticProxyManager> _logger;
@@ -136,6 +239,7 @@ namespace Slipka.Proxy
                 var config = kvp.Value;
                 var isRunning = _staticProxies.ContainsKey(config.Id);
                 var session = isRunning ? _staticProxies[config.Id].Session : null;
+                var gotCalls = session?.Calls?.Any() ?? false;
 
                 return new StaticProxyStatus
                 {
@@ -146,8 +250,8 @@ namespace Slipka.Proxy
                     TargetPort = config.TargetPort,
                     IsRunning = isRunning,
                     IsAutoStart = config.AutoStart,
-                    CallCount = session?.Calls?.Count ?? 0,
-                    LastActivity = session?.Calls?.Max(c => c.Recieved)
+                    CallCount = gotCalls? session.Calls.Count : 0,
+                    LastActivity = gotCalls ? session.Calls.Max(c => c.Recieved) : null
                 };
             });
         }
@@ -178,14 +282,15 @@ namespace Slipka.Proxy
                 TargetPortHttps = config.TargetPortHttps,
                 LeaveProxyOpenUntil = DateTime.UtcNow.Add(openFor),
                 RetainDataUntil = DateTime.UtcNow.Add(retainedFor),
+                MaxCallsInMemory = config.MaxCallsInMemory,
                 InternalId = MongoDB.Bson.ObjectId.GenerateNewId(),
-                Calls = new List<Call>(),
-                Tags = new List<string>(),
-                RecordedCalls = config.RecordedCalls ?? new List<ValueObjects.CallTemplate>(),
-                InjectedCalls = config.InjectedCalls ?? new List<ValueObjects.CallTemplate>(),
-                TaggedCalls = config.TaggedCalls ?? new List<ValueObjects.CallTemplate>(),
-                Decorations = config.Decorations ?? new List<ValueObjects.Header>(),
-                Preprocessors = await InitializePreprocessorsAsync(config.Preprocessors)
+                Calls = new ConcurrentQueue<Call>(),
+                Tags = new ConcurrentBag<string>(),
+                RecordedCalls = [.. config.RecordedCalls ?? []],
+                InjectedCalls = [.. config.InjectedCalls ?? []],
+                TaggedCalls = [.. config.TaggedCalls ?? []],
+                Decorations = [.. config.Decorations ?? []],
+                Preprocessors = new ConcurrentBag<IPreprocessor>(await InitializePreprocessorsAsync(config.Preprocessors))
             };
 
             return session;

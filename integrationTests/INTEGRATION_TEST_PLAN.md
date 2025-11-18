@@ -30,6 +30,10 @@ integrationTests/
 │       ├── CallTagging/                         # Tagging feature tests
 │       ├── SessionApi/                          # Data retrieval tests
 │       ├── HealthMonitoring/                    # Health check tests
+│       ├── HttpsSupport/                        # HTTPS proxy tests
+│       ├── Logging/                             # Logging endpoint tests
+│       ├── CorrelationIds/                      # Correlation ID tests
+│       ├── ReverseProxy/                        # Reverse proxy tests
 │       └── ErrorScenarios/                      # Error handling tests
 ├── docker-compose.integration.yml               # Test environment setup
 ├── .github/workflows/integration-tests.yml      # CI/CD pipeline
@@ -49,6 +53,10 @@ The integration tests include a dedicated Test API server that provides predicta
 - **GET /api/test/headers** - Tests header inspection
 - **GET /api/test/large** - Tests large response handling
 - **GET /api/test/auth-required** - Tests authentication scenarios
+- **GET /api/test/correlation** - Tests correlation ID handling and reflection
+- **POST /api/test/log-test** - Tests logging functionality with correlation IDs
+- **GET /api/test/secure** - Tests HTTPS-only endpoints (requires SSL/TLS)
+- **GET /api/test/mixed-protocol** - Tests endpoints that work on both HTTP/HTTPS
 
 ## Test Coverage
 
@@ -110,7 +118,48 @@ The integration tests include a dedicated Test API server that provides predicta
 - **Health Degradation**: Tests health check responses under load
 - **Health Recovery**: Tests health status after failures
 
-### 9. Error Scenarios ⏳ PENDING
+### 9. HTTPS Support on Proxies ✅ IMPLEMENTED
+- **SSL/TLS Termination**: Tests HTTPS proxy configuration and certificate handling 
+- **Certificate Validation**: Tests client certificate authentication 
+- **HTTPS to HTTP Proxying**: Tests forwarding HTTPS requests to HTTP backends 
+- **HTTPS to HTTPS Proxying**: Tests end-to-end HTTPS proxying
+- **Mixed Protocol Support**: Tests handling both HTTP and HTTPS traffic 
+- **Certificate Chain Validation**: Tests proper certificate chain verification 
+- **SSL Handshake Errors**: Tests behavior with invalid certificates 
+
+### 10. Logging ✅ IMPLEMENTED
+- **Log Message Submission**: Tests POST /api/logging endpoint functionality
+- **Correlation ID Validation**: Tests correlation ID format validation and handling
+- **Log Level Processing**: Tests different log levels (Debug, Info, Warning, Error)
+- **Structured Logging**: Tests custom properties and structured log data
+- **Category Assignment**: Tests log category tagging and filtering
+- **Timestamp Handling**: Tests custom timestamp vs automatic timestamp assignment
+- **Exception Logging**: Tests exception details in log messages
+- **Correlation Sub-ID Handling**: Tests original and new correlation sub-ID tracking
+- **Invalid Input Handling**: Tests validation errors for malformed log messages
+- **Log Message Size Limits**: Tests handling of large log messages
+
+### 11. Correlation IDs ✅ IMPLEMENTED
+- **Correlation ID Generation**: Tests automatic correlation ID generation
+- **Correlation ID Propagation**: Tests correlation ID passing through proxy requests
+- **Correlation Sub-ID Tracking**: Tests correlation sub-ID creation and management
+- **Header Preservation**: Tests x-correlation-id and x-correlation-sub-id header handling
+- **Cross-Request Correlation**: Tests correlation ID consistency across multiple requests
+- **Correlation ID Validation**: Tests correlation ID format validation
+- **ID Collision Handling**: Tests behavior with duplicate correlation IDs
+- **Distributed Tracing**: Tests correlation ID propagation in distributed scenarios
+- **Logging Integration**: Tests correlation ID inclusion in log messages
+
+### 12. Reverse Proxy ✅ IMPLEMENTED
+- **Route Configuration**: Tests reverse proxy route setup and configuration
+- **Path-Based Routing**: Tests URL path matching and forwarding
+- **Wildcard Route Matching**: Tests wildcard path patterns (e.g., /api/*)
+- **Authentication Integration**: Tests authentication requirements on routes
+- **Header Decoration**: Tests request header modification on routes
+- **Route Precedence**: Tests route matching priority and precedence rules
+- **Error Handling**: Tests failure scenarios (backend down, timeouts, etc.)
+
+### 13. Error Scenarios ⏳ PENDING
 - **Invalid Configurations**: Tests handling of malformed requests
 - **Network Failures**: Tests behavior when targets are unreachable
 - **Resource Limits**: Tests behavior under memory/CPU constraints
@@ -127,6 +176,10 @@ The integration tests include a dedicated Test API server that provides predicta
 - Dynamic proxy creation and management tests
 - Response injection with advanced matching rules
 - Traffic recording with filtering and data retrieval
+- Correlation ID generation, propagation, and tracking tests
+- Logging endpoint tests with comprehensive coverage
+- Reverse proxy functionality tests with routing, authentication, and header decoration
+- HTTPS support tests for SSL/TLS termination, certificate validation, and end-to-end HTTPS proxying
 - Docker Compose configuration for test environment
 - CI/CD pipeline configuration
 
@@ -232,6 +285,29 @@ dotnet test --filter "FullyQualifiedName~SpecificTest" --logger "console;verbosi
 ```
 
 ## Future Enhancements
+
+### Advanced HTTPS Testing
+- Mutual TLS (mTLS) authentication testing
+- Certificate rotation and renewal testing
+- SSL/TLS version negotiation testing
+- Custom certificate authority testing
+
+### Distributed Tracing
+- OpenTelemetry integration testing
+- Cross-service correlation ID propagation
+- Performance impact of tracing overhead
+
+### Reverse Proxy Advanced Features
+- Rate limiting and throttling tests
+- Circuit breaker pattern testing
+- Service mesh integration testing
+- API gateway functionality testing
+
+### Logging and Monitoring
+- Log aggregation and analysis testing
+- Structured logging performance testing
+- Log retention and rotation testing
+- Real-time log streaming testing
 
 ### Performance Testing
 - Load testing with multiple concurrent proxies

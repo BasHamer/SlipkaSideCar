@@ -15,6 +15,10 @@ services:
       - ProxySettings__MaxOpenFor=02:00:00:00
       - ProxySettings__DefaultRetainedFor=00:10:00
       - ProxySettings__MaxRetainedFor=31:00:00:00
+      - Kestrel__Certificates__Default__Path=/app/certificates/localhost.pfx
+      - Kestrel__Certificates__Default__Password=testpassword
+    volumes:
+      - ./certificates:/app/certificates:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4445/health"]
       interval: 10s

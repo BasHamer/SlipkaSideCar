@@ -29,6 +29,8 @@ namespace Slipka.Configuration
 
         public string RetainedFor { get; set; } = "365:00:00:00"; // 1 year for static proxies
 
+        public int? MaxCallsInMemory { get; set; } // Maximum number of recent calls to keep in memory (null = unlimited)
+
         public List<CallTemplate> RecordedCalls { get; set; } = new List<CallTemplate>();
 
         public List<CallTemplate> InjectedCalls { get; set; } = new List<CallTemplate>();

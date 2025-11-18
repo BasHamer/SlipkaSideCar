@@ -48,7 +48,7 @@ namespace Slipka.Controllers
         }
 
         private async Task<Message> GetMessageFromSession(Session session, int number, Func<Call, ObjectId> selector)
-            => await MessageRepository.GetMessage(selector(session.Calls[number]));
+            => await MessageRepository.GetMessage(selector(session.Calls.ToArray()[number]));
 
         private async Task<ActionResult> SimulateMessage(string id, int number, Func<Call, ObjectId> selector)
         {
