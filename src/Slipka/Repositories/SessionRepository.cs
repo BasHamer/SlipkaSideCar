@@ -93,7 +93,7 @@ namespace Slipka.Repositories
             await Context.Sessions
                 .ReplaceOneAsync(n => n.InternalId.Equals(item.InternalId)
                         , copy
-                        , new UpdateOptions { IsUpsert = true });
+                        , new ReplaceOptions { IsUpsert = true });
 
         }
 

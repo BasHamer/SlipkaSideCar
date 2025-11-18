@@ -11,7 +11,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "PossumLabs.Specflow.Slipka", "PossumLabs.Specflow.Slipka\PossumLabs.Specflow.Slipka.csproj", "{1F097083-3C8F-4E38-A2EF-6544E1CA0AFD}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Slipka.Test", "..\Slipka.Test\Slipka.Test.csproj", "{B94BACAE-5B17-4EE9-8507-1F3906EC43CD}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Slipka.Tests", "Slipka.Tests\Slipka.Tests.csproj", "{B94BACAE-5B17-4EE9-8507-1F3906EC43CD}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Slipka", "Slipka\Slipka.csproj", "{C279D816-01D7-4CC6-9F29-C326D41B7839}"
 EndProject

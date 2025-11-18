@@ -46,6 +46,10 @@ namespace Slipka.Proxy
         protected async override Task<HttpResponseMessage> SendAsync(HttpRequestMessage incommingRequest, CancellationToken cancellationToken)
         {
             HttpRequestMessage request = await CreateForwardableRequest(incommingRequest);
+
+            // Execute preprocessors before other processing
+            await ExecutePreprocessorsAsync(request);
+
             var call = new Call
             {
                 Uri = request.RequestUri,
@@ -130,7 +134,7 @@ namespace Slipka.Proxy
                             encoding = Encoding.UTF8;
                             break;
                         case "UTF7":
-                            encoding = Encoding.UTF7;
+                            encoding = Encoding.UTF8; // UTF7 is obsolete and insecure, fallback to UTF8
                             break;
                         case "UTF32":
                             encoding = Encoding.UTF32;
@@ -190,8 +194,8 @@ namespace Slipka.Proxy
             request.Method = incommingRequest.Method;
             request.RequestUri = incommingRequest.RequestUri;
 
-            foreach (KeyValuePair<string, object> prop in incommingRequest.Properties)
-                request.Properties.Add(prop);
+            // Properties is obsolete, custom properties should be handled via Options or headers
+            // For now, skip copying properties as Options has a different API
 
             return request;
         }
@@ -271,6 +275,21 @@ namespace Slipka.Proxy
                     response.Headers.Any(t => t.Key == h.Key && t.Values.Intersect(h.Values).Any()))
                 )
                 );
+        }
+
+        private async Task ExecutePreprocessorsAsync(HttpRequestMessage request)
+        {
+            if (Session.Preprocessors == null || Session.Preprocessors.Count == 0)
+            {
+                return;
+            }
+
+            // Execute all enabled preprocessors in parallel
+            var preprocessorTasks = Session.Preprocessors
+                .Where(p => p.IsEnabled)
+                .Select(p => p.ProcessAsync(request, Session));
+
+            await Task.WhenAll(preprocessorTasks);
         }
     }
 }

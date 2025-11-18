@@ -1,0 +1,79 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  integration-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Setup Docker Buildx
+      uses: actions/setup-buildx-action@v3
+
+    - name: Build Slipka Docker image
+      run: |
+        docker build -f src/Slipka/Dockerfile -t slipka:test src/
+
+    - name: Start services with Docker Compose
+      run: |
+        cd integrationTests
+        docker-compose -f ../src/docker-compose.yml -f docker-compose.integration.yml up -d
+        docker-compose ps
+
+    - name: Wait for services to be healthy
+      run: |
+        echo "Waiting for Slipka to be healthy..."
+        for i in {1..60}; do
+          if curl -f http://localhost:4445/health > /dev/null 2>&1; then
+            echo "Slipka is healthy!"
+            break
+          fi
+          echo "Waiting... ($i/60)"
+          sleep 5
+        done
+
+        echo "Waiting for TestAPI to be healthy..."
+        for i in {1..30}; do
+          if curl -f http://localhost:5001/api/test/echo?message=health > /dev/null 2>&1; then
+            echo "TestAPI is healthy!"
+            break
+          fi
+          echo "Waiting... ($i/30)"
+          sleep 2
+        done
+
+    - name: Run integration tests
+      run: |
+        cd integrationTests
+        dotnet test --logger "trx;LogFileName=test-results.trx" --results-directory ./test-results
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: integration-test-results
+        path: integrationTests/test-results/
+
+    - name: Display test results
+      if: always()
+      run: |
+        find integrationTests/test-results -name "*.trx" -exec cat {} \;
+
+    - name: Cleanup
+      if: always()
+      run: |
+        cd integrationTests
+        docker-compose down -v --remove-orphans

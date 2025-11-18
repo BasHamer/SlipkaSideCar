@@ -1,6 +1,7 @@
 ﻿using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
 using Newtonsoft.Json;
+using Slipka.Preprocessors.Interfaces;
 using Slipka.ValueObjects;
 using System;
 using System.Collections.Generic;
@@ -21,6 +22,7 @@ namespace Slipka.DomainObjects
             InjectedCalls = new List<CallTemplate>();
             TaggedCalls = new List<CallTemplate>();
             Decorations = new List<Header>();
+            Preprocessors = new List<IPreprocessor>();
         }
         [JsonIgnore]
         [BsonId]
@@ -38,6 +40,10 @@ namespace Slipka.DomainObjects
         public string TargetHost { get; set; }
         [BsonElement("target_port")]
         public int? TargetPort { get; set; }
+        [BsonElement("proxy_port_https")]
+        public bool ProxyPortHttps { get; set; }
+        [BsonElement("target_port_https")]
+        public bool TargetPortHttps { get; set; }
 
         [BsonElement]
         public List<string> Tags { get; set; }
@@ -50,6 +56,8 @@ namespace Slipka.DomainObjects
         public List<CallTemplate> TaggedCalls { get; set; }
         [BsonElement("decorations")]
         public List<Header> Decorations { get; set; }
+        [BsonIgnore] // Preprocessors are not serialized to MongoDB as they contain runtime state
+        public List<IPreprocessor> Preprocessors { get; set; }
 
         [BsonElement("retain_data_until")]
         public DateTime RetainDataUntil { get; set; }

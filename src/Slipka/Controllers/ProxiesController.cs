@@ -11,9 +11,11 @@ using Microsoft.Extensions.Options;
 using Slipka.ApiArguments;
 using Slipka.Configuration;
 using Slipka.DomainObjects;
+using Slipka.Preprocessors.Interfaces;
 using Slipka.Proxy;
 using Slipka.Repositories;
 using Slipka.ValueObjects;
+using Slipka.Caching;
 
 namespace Slipka.Controllers
 {
@@ -21,12 +23,22 @@ namespace Slipka.Controllers
     [Route("api/Proxies")]
     public class ProxiesController : Controller
     {
-        public ProxiesController(ProxySettings settings, ProxyStore store, IFileRepository fileRepository, IMessageRepository messageRepository)
+        public ProxiesController(
+            ProxySettings settings,
+            ProxyStore store,
+            IFileRepository fileRepository,
+            IMessageRepository messageRepository,
+            StaticProxyManager staticProxyManager,
+            ICacheInvalidationService cacheInvalidationService,
+            IPreprocessorFactory preprocessorFactory)
         {
             Settings = settings;
             Store = store;
             FileRepository = fileRepository;
             MessageRepository = messageRepository;
+            StaticProxyManager = staticProxyManager;
+            CacheInvalidationService = cacheInvalidationService;
+            PreprocessorFactory = preprocessorFactory;
             Random = new Random(Guid.NewGuid().GetHashCode());
             ReservedPorts = Enumerable.Range(Settings.FirstPort, Settings.LastPort - Settings.FirstPort).ToArray();
         }
@@ -35,12 +47,15 @@ namespace Slipka.Controllers
         private ProxyStore Store { get; }
         private IFileRepository FileRepository { get; }
         private IMessageRepository MessageRepository { get; }
+        private StaticProxyManager StaticProxyManager { get; }
+        private ICacheInvalidationService CacheInvalidationService { get; }
+        private IPreprocessorFactory PreprocessorFactory { get; }
         private int[] ReservedPorts { get; }
         private Random Random { get; }
 
         // POST: api/Proxies
         [HttpPost]
-        public ActionResult<Session> Post([FromBody] CreateProxyMessage value)
+        public async Task<ActionResult<Session>> Post([FromBody] CreateProxyMessage value)
         {
             if (!ModelState.IsValid)
             {
@@ -53,6 +68,8 @@ namespace Slipka.Controllers
             {
                 TargetHost = value.TargetHost,
                 TargetPort = value.TargetPort ?? 80,
+                ProxyPortHttps = value.ProxyPortHttps,
+                TargetPortHttps = value.TargetPortHttps,
                 LeaveProxyOpenUntil = DateTime.UtcNow.Add(open > Settings.MaxOpenFor ? Settings.MaxOpenFor : open),
                 RetainDataUntil = DateTime.UtcNow.Add(retained > Settings.MaxRetainedFor ? Settings.MaxRetainedFor : retained)
             };
@@ -65,6 +82,23 @@ namespace Slipka.Controllers
                 session.InjectedCalls.AddRange(value.InjectedCalls.Select(x => x.AsCallTemplate));
             if (value.Decorations != null)
                 session.Decorations.AddRange(value.Decorations.Select(x => x.AsHeader));
+
+            if (value.Preprocessors != null)
+            {
+                foreach (var preprocessorMessage in value.Preprocessors)
+                {
+                    try
+                    {
+                        var preprocessor = await preprocessorMessage.ToPreprocessorAsync(PreprocessorFactory);
+                        session.Preprocessors.Add(preprocessor);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Failed to create preprocessor during proxy creation: {ex.Message}");
+                        // Continue with other preprocessors even if one fails
+                    }
+                }
+            }
 
             session.InternalId = new MongoDB.Bson.ObjectId();
             session.Calls = new List<Call>();
@@ -98,7 +132,8 @@ namespace Slipka.Controllers
 
         private int GetNewPort(Session value)
         {
-            var available = ReservedPorts.Except(Store.All.Select(x => x.ProxyPort)).ToList();
+            var staticProxyPorts = StaticProxyManager.GetStaticProxyStatuses().Select(s => s.Port);
+            var available = ReservedPorts.Except(Store.All.Select(x => x.ProxyPort)).Except(staticProxyPorts).ToList();
 
             var retries = 0;
             while (retries < 1000)
@@ -196,6 +231,32 @@ namespace Slipka.Controllers
             return Ok(session);
         }
 
+        [HttpPut("{id}/preprocessor")]
+        public async Task<ActionResult<Session>> PutPreprocessor(string id, [FromBody] PreprocessorMessage preprocessorMessage)
+        {
+            if (!SessionAvailableForModification(id, out var error, out Session session))
+                return error;
+
+            if (preprocessorMessage == null)
+            {
+                return BadRequest("Preprocessor configuration is required");
+            }
+
+            try
+            {
+                var preprocessor = await preprocessorMessage.ToPreprocessorAsync(PreprocessorFactory);
+                lock (session.Preprocessors)
+                {
+                    session.Preprocessors.Add(preprocessor);
+                }
+                return Ok(session);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest($"Failed to create preprocessor: {ex.Message}");
+            }
+        }
+
         private bool SessionAvailableForModification(string id, out ActionResult<Session> error, out Session session)
         {
             try
@@ -215,6 +276,94 @@ namespace Slipka.Controllers
             }
             error = null;
             return true;
+        }
+
+        // GET: api/Proxies/static
+        [HttpGet("static")]
+        [ResponseCache(Duration = 30)] // Cache for 30 seconds
+        public ActionResult<IEnumerable<Proxy.StaticProxyStatus>> GetStaticProxies()
+        {
+            var statuses = StaticProxyManager.GetStaticProxyStatuses();
+            return Ok(statuses);
+        }
+
+        // GET: api/Proxies/static/{id}
+        [HttpGet("static/{id}")]
+        [ResponseCache(Duration = 30)] // Cache for 30 seconds
+        public ActionResult<Proxy.StaticProxyStatus> GetStaticProxy(string id)
+        {
+            var statuses = StaticProxyManager.GetStaticProxyStatuses();
+            var status = statuses.FirstOrDefault(s => s.Id == id);
+            if (status == null)
+            {
+                return NotFound();
+            }
+            return Ok(status);
+        }
+
+        // POST: api/Proxies/static/{id}/start
+        [HttpPost("static/{id}/start")]
+        public async Task<ActionResult> StartStaticProxy(string id)
+        {
+            try
+            {
+                await StaticProxyManager.StartStaticProxyAsync(id);
+
+                // Invalidate cache for this specific proxy since its status changed
+                await CacheInvalidationService.InvalidateProxyCacheAsync(id);
+
+                return Ok();
+            }
+            catch (ArgumentException)
+            {
+                return NotFound();
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Failed to start static proxy: {ex.Message}");
+            }
+        }
+
+        // POST: api/Proxies/static/{id}/stop
+        [HttpPost("static/{id}/stop")]
+        public async Task<ActionResult> StopStaticProxy(string id)
+        {
+            try
+            {
+                await StaticProxyManager.StopStaticProxyAsync(id);
+
+                // Invalidate cache for this specific proxy since its status changed
+                await CacheInvalidationService.InvalidateProxyCacheAsync(id);
+
+                return Ok();
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Failed to stop static proxy: {ex.Message}");
+            }
+        }
+
+        // POST: api/Proxies/static/{id}/restart
+        [HttpPost("static/{id}/restart")]
+        public async Task<ActionResult> RestartStaticProxy(string id)
+        {
+            try
+            {
+                await StaticProxyManager.RestartStaticProxyAsync(id);
+
+                // Invalidate cache for this specific proxy since its status changed
+                await CacheInvalidationService.InvalidateProxyCacheAsync(id);
+
+                return Ok();
+            }
+            catch (ArgumentException)
+            {
+                return NotFound();
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Failed to restart static proxy: {ex.Message}");
+            }
         }
     }
 }

@@ -58,7 +58,7 @@ namespace Slipka.Proxy
               .ConfigureServices(s => { s.AddSingleton(MessageRepository); })
               .ConfigureServices(s=> { s.AddSingleton(SaveSession); })
               .UseKestrel()
-              .UseUrls($"http://*:{Session.ProxyPort}") 
+              .UseUrls($"{(Session.ProxyPortHttps ? "https" : "http")}://*:{Session.ProxyPort}") 
               .UseStartup<ProxyStartup>()
               .Build();
             Host.Start();

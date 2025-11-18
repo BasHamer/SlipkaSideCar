@@ -5,15 +5,24 @@ services:
     image: mongo
     ports:
       - "27017:27017"
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
   slipka: 
     image: slipka
     build:
       context: .
       dockerfile: Slipka/Dockerfile
-    depends_on: 
+    depends_on:
       - db
-    links: 
+      - redis
+    links:
       - "db:db"
+      - "redis:redis"
     ports:
       - "4445:4445"
       - "61710-61920:61710-61920"
@@ -39,3 +48,6 @@ services:
     deploy:
       mode: replicated
       replicas: 6
+
+volumes:
+  redis-data:

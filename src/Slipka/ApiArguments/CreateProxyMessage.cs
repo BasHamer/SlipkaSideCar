@@ -15,6 +15,7 @@ namespace Slipka.ApiArguments
             InjectedCalls = new List<InjectMessage>();
             TaggedCalls = new List<TagMessage>();
             Decorations = new List<DecorateMessage>();
+            Preprocessors = new List<PreprocessorMessage>();
         }
 
         public string Name { get; set; }
@@ -22,6 +23,8 @@ namespace Slipka.ApiArguments
         [Required]
         public string TargetHost { get; set; }
         public int? TargetPort { get; set; }
+        public bool ProxyPortHttps { get; set; }
+        public bool TargetPortHttps { get; set; }
 
         public List<string> Tags { get; set; }
 
@@ -32,6 +35,8 @@ namespace Slipka.ApiArguments
         public List<TagMessage> TaggedCalls { get; set; }
 
         public List<DecorateMessage> Decorations { get; set; }
+
+        public List<PreprocessorMessage> Preprocessors { get; set; }
 
         [IsFuture()]
         public string RetainedFor { get; set; }

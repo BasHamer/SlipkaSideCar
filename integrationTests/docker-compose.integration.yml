@@ -1,0 +1,93 @@
+version: '3.4'
+
+# Integration test override for docker-compose
+# Use with: docker-compose -f docker-compose.yml -f integrationTests/docker-compose.integration.yml up -d
+
+services:
+  slipka:
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - Logging__LogLevel__Default=Information
+      - Logging__LogLevel__Microsoft.AspNetCore=Warning
+      - ProxySettings__FirstPort=61710
+      - ProxySettings__LastPort=61920
+      - ProxySettings__DefaultOpenFor=00:05:00
+      - ProxySettings__MaxOpenFor=02:00:00:00
+      - ProxySettings__DefaultRetainedFor=00:10:00
+      - ProxySettings__MaxRetainedFor=31:00:00:00
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4445/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    ports:
+      - "4445:4445"
+      - "61710-61920:61710-61920"
+
+  db:
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Test API server for integration tests
+  testapi:
+    build:
+      context: .
+      dockerfile: Slipka.IntegrationTests/TestApi/Dockerfile
+    depends_on:
+      slipka:
+        condition: service_healthy
+    ports:
+      - "5001:80"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:80
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/api/test/echo?message=health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Selenium Grid for UI testing (if needed)
+  selenium-hub:
+    image: selenium/hub:4.15.0
+    ports:
+      - "4442:4444"  # Different port to avoid conflict with Slipka
+    environment:
+      - SE_EVENT_BUS_HOST=selenium-hub
+      - SE_EVENT_BUS_PUBLISH_PORT=4442
+      - SE_EVENT_BUS_SUBSCRIBE_PORT=4443
+
+  chrome:
+    image: selenium/node-chrome:120.0
+    depends_on:
+      - selenium-hub
+      - slipka
+      - testapi
+    environment:
+      - SE_EVENT_BUS_HOST=selenium-hub
+      - SE_EVENT_BUS_PUBLISH_PORT=4442
+      - SE_EVENT_BUS_SUBSCRIBE_PORT=4443
+      - SE_NODE_MAX_SESSIONS=5
+      - SE_NODE_OVERRIDE_MAX_SESSIONS=true
+    volumes:
+      - /dev/shm:/dev/shm
+    deploy:
+      replicas: 2
+
+networks:
+  default:
+    name: slipka_integration_network

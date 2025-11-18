@@ -1,23 +1,17 @@
-FROM microsoft/dotnet:2.1-aspnetcore-runtime AS base
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
 WORKDIR /app
 EXPOSE 4445
-EXPOSE 61010-61020
+EXPOSE 61710-61920
 
-FROM microsoft/dotnet:2.1-sdk AS build
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
-COPY Slipka.Docker.sln ./
-COPY docker-compose* ./
-COPY Microsoft.AspNetCore.Proxy/Microsoft.AspNetCore.Proxy.csproj Microsoft.AspNetCore.Proxy/
-COPY Slipka/Slipka.csproj Slipka/
-RUN dotnet restore Slipka.Docker.sln
-COPY . .
+COPY Microsoft.AspNetCore.Proxy/ Microsoft.AspNetCore.Proxy/
+COPY Slipka/ Slipka/
 WORKDIR /src/Slipka
-RUN dotnet build -c Release -o /app
-
-FROM build AS publish
+RUN dotnet restore
 RUN dotnet publish -c Release -o /app
 
 FROM base AS final
 WORKDIR /app
-COPY --from=publish /app .
+COPY --from=build /app .
 ENTRYPOINT ["dotnet", "Slipka.dll"]

@@ -51,7 +51,7 @@ namespace Slipka.Repositories
             await Context.Messages
                 .ReplaceOneAsync(n => n.InternalId.Equals(item.InternalId)
                         , item
-                        , new UpdateOptions { IsUpsert = true });
+                        , new ReplaceOptions { IsUpsert = true });
         }
 
     }
